@@ -1,0 +1,27 @@
+# Environment variables
+.env
+config_local.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Output files
+*.csv
+test_contacts.csv
+apollo_contacts.csv
+

@@ -1,0 +1,6 @@
+# Local configuration file
+# Copy this to config_local.py and add your API key
+# This file is gitignored, so your key won't be committed
+
+APOLLO_API_KEY = "your_api_key_here"
+
