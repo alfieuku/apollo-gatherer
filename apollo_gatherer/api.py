@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Iterator, List, Optional, Union
+from typing import Dict, Iterable, Iterator, List, Optional
 
 import requests
 
@@ -39,17 +39,20 @@ class ApolloClient:
 
     def __post_init__(self) -> None:
         self.session = requests.Session()
-        self.session.headers.update({
-            "Content-Type": "application/json",
-            "Cache-Control": "no-cache",
-        })
+        self.session.headers.update(
+            {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-cache",
+                "x-api-key": self.api_key,
+            }
+        )
 
     def search_people(
         self,
         *,
-        job_titles: Iterable[str],
-        company_names: Iterable[str],
-        country: str,
+        job_titles: Optional[Iterable[str]] = None,
+        company_names: Optional[Iterable[str]] = None,
+        country: Optional[str] = None,
         per_page: int = 25,
         max_pages: Optional[int] = None,
         request_delay: float = 0.0,
@@ -79,11 +82,18 @@ class ApolloClient:
             body, allowing advanced callers to refine the query.
         """
 
-        payload_base: Dict[str, object] = {
-            "person_titles": _to_list(job_titles),
-            "person_locations": [country],
-            "organization_names": _to_list(company_names),
-        }
+        payload_base: Dict[str, object] = {}
+
+        titles = _to_list(job_titles)
+        if titles:
+            payload_base["person_titles"] = titles
+
+        if country:
+            payload_base["person_locations"] = [country]
+
+        organizations = _to_list(company_names)
+        if organizations:
+            payload_base["organization_names"] = organizations
 
         if extra_filters:
             payload_base.update(extra_filters)
@@ -100,9 +110,7 @@ class ApolloClient:
                 "per_page": per_page,
             }
 
-            # Also try x-api-key header (some Apollo endpoints prefer this)
-            headers = {"x-api-key": self.api_key}
-            response_json = self._post("/people/search", payload, headers=headers)
+            response_json = self._request("POST", "/people/search", payload=payload)
             people = response_json.get("people", [])
             if not people:
                 break
@@ -119,17 +127,117 @@ class ApolloClient:
             if request_delay:
                 time.sleep(request_delay)
 
-    def _post(self, path: str, payload: Dict[str, object], headers: Optional[Dict[str, str]] = None) -> Dict[str, object]:
+    def iter_lists(
+        self,
+        *,
+        per_page: int = 100,
+        max_pages: Optional[int] = None,
+        request_delay: float = 0.0,
+    ) -> Iterator[Dict[str, object]]:
+        page = 1
+        while True:
+            if max_pages is not None and page > max_pages:
+                break
+
+            params = {
+                "api_key": self.api_key,
+                "page": page,
+                "per_page": per_page,
+            }
+            response_json = self._request("GET", "/lists", params=params)
+            lists = response_json.get("lists") or response_json.get("results") or []
+            if not lists:
+                break
+
+            for apollo_list in lists:
+                yield apollo_list
+
+            pagination = response_json.get("pagination", {})
+            total_pages = pagination.get("total_pages")
+            if total_pages is not None and page >= total_pages:
+                break
+
+            page += 1
+            if request_delay:
+                time.sleep(request_delay)
+
+    def get_list_by_name(self, name: str) -> Optional[Dict[str, object]]:
+        target = name.strip().lower()
+        for apollo_list in self.iter_lists():
+            list_name = (apollo_list.get("name") or "").strip().lower()
+            if list_name == target:
+                return apollo_list
+        return None
+
+    def iter_list_contacts(
+        self,
+        list_id: str,
+        *,
+        per_page: int = 50,
+        max_contacts: Optional[int] = None,
+        request_delay: float = 0.0,
+    ) -> Iterator[Dict[str, object]]:
+        page = 1
+        yielded = 0
+
+        while True:
+            if max_contacts is not None and yielded >= max_contacts:
+                break
+
+            params = {
+                "api_key": self.api_key,
+                "page": page,
+                "per_page": per_page,
+            }
+
+            response_json = self._request(
+                "GET", f"/lists/{list_id}/contacts", params=params
+            )
+            contacts = (
+                response_json.get("contacts")
+                or response_json.get("list_contacts")
+                or response_json.get("results")
+                or []
+            )
+            if not contacts:
+                break
+
+            for contact in contacts:
+                if max_contacts is not None and yielded >= max_contacts:
+                    break
+                yielded += 1
+                yield contact
+
+            pagination = response_json.get("pagination", {})
+            total_pages = pagination.get("total_pages")
+            if total_pages is not None and page >= total_pages:
+                break
+
+            page += 1
+            if request_delay:
+                time.sleep(request_delay)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: Optional[Dict[str, object]] = None,
+        params: Optional[Dict[str, object]] = None,
+    ) -> Dict[str, object]:
         url = f"{self.base_url}{path}"
         attempt = 0
 
         while True:
             attempt += 1
             try:
-                request_headers = {**self.session.headers}
-                if headers:
-                    request_headers.update(headers)
-                response = self.session.post(url, json=payload, headers=request_headers, timeout=60)
+                response = self.session.request(
+                    method,
+                    url,
+                    json=payload if payload is not None else None,
+                    params=params,
+                    timeout=60,
+                )
             except requests.RequestException as exc:  # pragma: no cover - rare
                 raise ApolloError(f"Failed to call Apollo API: {exc}") from exc
 
@@ -173,7 +281,9 @@ def _safe_json(response: requests.Response) -> Dict[str, object]:
         )
 
 
-def _to_list(values: Iterable[str]) -> List[str]:
+def _to_list(values: Optional[Iterable[str]]) -> List[str]:
+    if values is None:
+        return []
     return [value for value in (value.strip() for value in values) if value]
 
 

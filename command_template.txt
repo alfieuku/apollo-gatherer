@@ -1,0 +1,9 @@
+cd /Users/alfieuku/apollo-gatherer
+
+python3 -m apollo_gatherer \
+  --api-key <insert-here> \
+  --job-title "YOUR_JOB_TITLE" \
+  --company "YOUR_COMPANY" \
+  --country "United States" \
+  --max-contacts 2 \
+  --output contacts.csv

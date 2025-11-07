@@ -1,6 +1,7 @@
 # Environment variables
 .env
 config_local.py
+.apollo_seen_emails.txt
 
 # Python
 __pycache__/
